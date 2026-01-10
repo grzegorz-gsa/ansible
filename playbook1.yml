@@ -1,0 +1,13 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: instalacja apache'a
+      apt:
+        name: apache2
+        update-cache: yes
+    - name: wystartuj apache2
+      service:
+        name: apache2
+        state: started
+...

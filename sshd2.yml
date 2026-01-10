@@ -1,0 +1,41 @@
+---
+- name: Configure SSHD daemon settings
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ensure SSH banner is set to /etc/motd
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Banner'
+        line: 'Banner /etc/motd'
+        state: present
+        backup: yes
+
+    - name: Disable X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?X11Forwarding'
+        line: 'X11Forwarding no'
+        state: present
+        backup: yes
+
+    - name: Set MaxAuthTries to 3
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?MaxAuthTries'
+        line: 'MaxAuthTries 3'
+        state: present
+        backup: yes
+
+    - name: Restart SSH service to apply changes
+      service:
+        name: sshd
+        state: restarted
+      notify: restart sshd
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
+

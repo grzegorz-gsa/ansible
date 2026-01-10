@@ -1,0 +1,69 @@
+---
+- name: Generate system report on managed hosts
+  hosts: all
+  become: yes
+
+  vars:
+    report_dir: /tmp/raport
+    report_file: "raport_{{ ansible_hostname }}_{{ ansible_date_time.date }}.txt"
+
+  tasks:
+
+    - name: Ensure report directory exists
+      file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Gather CPU info
+      command: cat /proc/cpuinfo
+      register: cpuinfo
+
+    - name: Gather free RAM info
+      command: free -h
+      register: meminfo
+
+    - name: Gather disk space info
+      command: df -h
+      register: diskinfo
+
+    - name: Gather kernel version
+      command: uname -r
+      register: kernelinfo
+
+    # --- INSTALLED PACKAGES (unified cross-platform task) ---
+
+    - name: Gather installed software list
+      command: "{{ 'rpm -qa --last' if ansible_facts.os_family == 'RedHat' else 'dpkg -l' }}"
+      register: pkgs
+
+    # --- REPORT CREATION ---
+
+    - name: Create report file on remote host
+      copy:
+        dest: "{{ report_dir }}/{{ report_file }}"
+        content: |
+          Raport systemowy dla hosta: {{ ansible_hostname }}
+          Data: {{ ansible_date_time.date }}
+
+          === CPU INFO ===
+          {{ cpuinfo.stdout }}
+
+          === MEMORY INFO ===
+          {{ meminfo.stdout }}
+
+          === DISK INFO ===
+          {{ diskinfo.stdout }}
+
+          === KERNEL VERSION ===
+          {{ kernelinfo.stdout }}
+
+          === INSTALLED PACKAGES ===
+          {{ pkgs.stdout }}
+
+    - name: Fetch report to control node
+      fetch:
+        src: "{{ report_dir }}/{{ report_file }}"
+        dest: "/tmp/raport/"
+        flat: yes
+

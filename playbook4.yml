@@ -1,0 +1,30 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: instalacja apache'a na Debianie
+      apt:
+        name: apache2
+        update-cache: yes
+      when: ansible_os_family == "Debian"
+    - name: wystartuj apache2 na Debianie
+      service:
+        name: apache2
+        state: started
+      when: ansible_os_family == "Debian"
+    - name: instalacja apache'a na RedHacie
+      yum:
+        name: httpd
+        state: latest
+      when: ansible_os_family == "RedHat"
+    - name: wystartuj apache2 na RedHacie
+      service:
+        name: httpd
+        state: started
+      when: ansible_os_family == "RedHat"
+    - name: instalacja index.html
+      template:
+        src: index.html.j2
+        dest: /var/www/html/index.html
+        mode: 0777
+...

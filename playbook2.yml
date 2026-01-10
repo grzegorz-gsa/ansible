@@ -1,0 +1,13 @@
+---
+- hosts: redhaty
+  become: true
+  tasks:
+    - name: instalacja apache'a
+      apt:
+        name: httpd
+        state: latest
+    - name: wystartuj apache2
+      service:
+        name: httpd
+        state: started
+...

@@ -1,0 +1,13 @@
+---
+- name: Add cron job to log time every minute
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Ensure cron job exists
+      cron:
+        name: "Log time every minute"
+        minute: "*"
+        job: "date >> /var/log/time.log"
+        user: root
+

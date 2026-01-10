@@ -1,0 +1,361 @@
+Grzegorz Sanecki
+00ubuntu
+
+Public IP address: 134.149.17.145
+Private IP address: 10.4.0.13
+Login: kurs
+Hasło: 3Szkolenie.admin2
+Dostęp przez ssh, rdp
+
+00rocky3vm
+
+Private IP address: 10.4.0.103
+Login: kurs
+Hasło: 3Szkolenie.admin2
+Dostęp przez ssh z maszyny 00ubuntu
+
+02worker
+
+Private IP address: 10.4.0.203
+Login: kurs
+Hasło: 3Szkolenie.admin2
+Dostęp przez ssh z maszyny 00ubuntu
+
+
+https://transfer.pcloud.com/download.html?code=5Zgumw5ZAt1WD6qqGXYZH3iSZeyCjQ3orq88fhr9WJye288qqD6xV
+
+
+-------------------------
+
+
+Zakładamy na wszystkich vmkach konto automation z hasłem automation i wpisem do visudo
+
+automation      ALL=(ALL:ALL) NOPASSWD:ALL
+
+teraz bedąc zalogowanym na koncie automation
+
+tworzymy:
+    
+    
+[automation@ansible-control]$ mkdir plays
+[automation@ansible-control]$ cd plays
+[automation@ansible-control plays]$ cat ansible.cfg
+ 
+[defaults]
+roles_path = /home/automation/plays/roles
+inventory = /home/automation/plays/inventory
+forks = 10
+#remote_user = automation
+log_path = /home/automation/ansible.log
+
+
+automation@controller1:~$ tree
+.
+└── plays
+    ├── ansible.cfg
+    └── inventory
+        └── hosts
+
+3 directories, 2 files
+automation@controller1:~$ cat plays/inventory/hosts 
+[redhaty]
+10.4.0.100
+
+[debiany]
+10.4.0.200
+
+Ostatnia faza - wymiana kluczy ssh
+
+Na kontrolerze
+
+ssh-keygen
+ssh-copy-id 10.4.0.100  # node1
+ssh-copy-id 10.4.0.200  # node2
+   
+   
+   Wyciszenie warninga z wersją Pythona
+   
+[defaults]
+interpreter_python = auto_silent
+   
+   
+   Playbook1
+   
+   
+cat playbook1.yml playbook2.yml 
+---
+- hosts: debiany
+  become: yes
+  tasks:
+    - name: instalacja apache'a
+      apt:
+        name: apache2
+        update-cache: yes
+    - name: wystartuj apache2
+      service:
+        name: apache2
+        state: started
+---
+- hosts: redhaty
+  become: yes
+  tasks:
+    - name: instalacja apache'a
+      yum:
+        name: httpd
+        state: latest
+    - name: wystartuj apache2
+      service:
+        name: httpd
+        state: started
+        
+Warunek when:
+    
+    ---
+- hosts: all
+  become: yes
+  tasks:
+    - name: instalacja apache'a DEB
+      apt:
+        name: apache2
+        update-cache: yes
+      when: ansible_os_family == "Debian"
+    - name: wystartuj apache2
+      service:
+        name: apache2
+        state: started
+      when: ansible_os_family == "Debian"
+    - name: instalacja apache'a RH
+      yum:
+        name: httpd
+        state: latest
+      when: ansible_os_family == "RedHat"
+    - name: wystartuj apache2
+      service:
+        name: httpd
+        state: started
+      when: ansible_os_family == "RedHat"
+    - name: add http site
+      template:
+        src: index.html.j2
+        dest: /var/www/html/index.html
+        mode: 0777
+      
+     
+     
+index.html.j2.
+
+<html>
+<center>
+   <h1> The hostname of this webserver is {{ ansible_hostname }}</h1>
+   <h3> It is running on {{ ansible_os_family}}system </h3>
+</center>
+</html>
+      
+      
+      
+      
+
+
+Zadanie nr2 - z dawnego egazminu Redhat EX300
+
+Create a playbook /home/automation/plays/sshd.yml that runs on all inventory hosts and configures SSHD daemon as follows:
+banner is set to /etc/motd # tutaj warto coś wpisać np /etc/motd.j2 a w nim
+Witaj na serwerze {{ ansible_hostname }}
+
+X11Forwarding is disabled
+MaxAuthTries is set to 3
+
+https://docs.ansible.com/ansible/latest/collections/ansible/builtin/replace_module.html#ansible-collections-ansible-builtin-replace-module
+
+
+
+Rozw.1
+
+- hosts: all
+  become: yes
+  tasks:
+  - name: Stwórz banner
+    template:
+      src: motd.j2
+      dest: /etc/motd
+
+  - name: X11Forwarding
+    replace:
+      path: /etc/ssh/sshd_config
+      regexp: '^X11Forwarding yes'
+      replace: 'X11Forwarding no'
+ 
+  - name: MaxAuthtries
+    replace:
+      path: /etc/ssh/sshd_config
+      regexp: '^#MaxAuthTries 6'
+      replace: 'MaxAuthTries 3'
+ 
+  - name: Banner
+    replace:
+      path: /etc/ssh/sshd_config
+      regexp: '^#Banner none'
+      replace: 'Banner /etc/motd'
+
+
+Rozw.2 z lineinfile
+
+---- name: Configure SSHD daemon settings
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ensure SSH banner is set to /etc/motd
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Banner'
+        line: 'Banner /etc/motd'
+        state: present
+        backup: yes
+
+    - name: Disable X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?X11Forwarding'
+        line: 'X11Forwarding no'
+        state: present
+        backup: yes
+
+    - name: Set MaxAuthTries to 3
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?MaxAuthTries'
+        line: 'MaxAuthTries 3'
+        state: present
+        backup: yes
+
+    - name: Restart SSH service to apply changes
+      service:
+        name: sshd
+        state: restarted
+      notify: restart sshd
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
+        
+        
+        
+        Główne wartości ansible_os_family:
+Linux Distributions:
+RedHat - RHEL, CentOS, Fedora, Rocky Linux, AlmaLinux
+Debian - Debian, Ubuntu, Linux Mint
+Suse - openSUSE, SLES
+Archlinux - Arch Linux, Manjaro
+Gentoo - Gentoo Linux
+Unix Systems:
+Solaris - Oracle Solaris
+BSD - FreeBSD, OpenBSD, NetBSD
+Darwin - macOS
+Windows:
+Windows - Windows Server, Windows Desktop
+
+
+https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_vars_facts.html
+
+
+Zadanie
+
+Stwórz raport z zarządzanych serwerów
+plik zapisz w katalogu /tmp/raport na kontrolerze
+Co ma zawierać?
+
+1. Informacje o procesorze
+2. o wolnej pamięci RAM
+3. Wolnym miejscu na dysku
+4. Wersji jądra
+5. ZAinstalowanym oprogramowaniu
+
+Plik docelowy ma zawierać datę i nazwę hosta
+
+podpowiedź moduł fetch
+
+
+- hosts: all
+  become: yes
+  tasks:
+  - name: procek
+    command: cp /proc/cpuinfo /tmp/raport
+  - name: naglowek cpu
+    lineinfile: 
+      path: /tmp/raport
+      line: '[CPU]'
+      insertbefore: BOF
+  - name: naglowek RAM
+    lineinfile:
+      path: /tmp/raport
+      line: '[RAM]'
+      insertafter: EOF
+  - name: RAM
+    lineinfile:
+      path: /tmp/raport
+      line: "{{ ansible_memtotal_mb }} MB RAM"
+      insertafter: EOF
+  - name: naglowek Wolne miejsce
+    lineinfile:
+      path: /tmp/raport
+      line: "\n[Wolne miejsce]\n"
+      insertafter: EOF
+  - name: wolne miejsce 
+    shell:
+      cmd: df -h >> /tmp/raport
+  - name: naglowek kernel
+    shell:
+      cmd: echo "[Wersja jadra]" >> /tmp/raport
+  - name: Wersja jadra
+    shell:
+      cmd: uname -a | cut -f3 -d ' ' >> /tmp/raport
+  - name: naglowek pakietow
+    shell:
+      cmd: echo "[Zainstalowane oprogramowanie]" >> /tmp/raport
+  - name: pakiety redhat
+    shell:
+      cmd: rpm -qa >> /tmp/raport
+    when: ansible_os_family == "RedHat"
+  - name: pakiety debian
+    shell:
+      cmd: apt list --installed  >> /tmp/raport
+    when: ansible_os_family == "Debian"
+  - name: Pobranie pliku
+    fetch:
+      src: /tmp/raport
+      dest: tmp/raport-{{ ansible_hostname }}-{{ ansible_date_time.date }}
+      flat: yes
+  - name: Czyszczenie
+    file:
+      path: /tmp/raport
+      state: absent
+	  
+	  
+	  
+Zadanie
+
+Dodaj do harmonogramu zadań wpis aby co godzinę data była dopisywana do /var/log/time.log
+
+
+---
+- hosts: all
+  become: yes
+  gather_facts: no
+ 
+  tasks:
+ 
+  - name: Cron with date command as a job
+    cron:
+      name: "Append actual date to time.log"
+      minute: "0"
+      hour: "*"
+      job: "/bin/date >> /var/log/time.log"
+	  
+	  
+https://docs.ansible.com/projects/ansible/latest/dev_guide/debugging.html
+
+Tagi
+
+https://www.linuxtechi.com/how-to-use-tags-in-ansible-playbook/

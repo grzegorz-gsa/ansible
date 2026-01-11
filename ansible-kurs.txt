@@ -1,33 +1,3 @@
-Grzegorz Sanecki
-00ubuntu
-
-Public IP address: 134.149.17.145
-Private IP address: 10.4.0.13
-Login: kurs
-Hasło: 3Szkolenie.admin2
-Dostęp przez ssh, rdp
-
-00rocky3vm
-
-Private IP address: 10.4.0.103
-Login: kurs
-Hasło: 3Szkolenie.admin2
-Dostęp przez ssh z maszyny 00ubuntu
-
-02worker
-
-Private IP address: 10.4.0.203
-Login: kurs
-Hasło: 3Szkolenie.admin2
-Dostęp przez ssh z maszyny 00ubuntu
-
-
-https://transfer.pcloud.com/download.html?code=5Zgumw5ZAt1WD6qqGXYZH3iSZeyCjQ3orq88fhr9WJye288qqD6xV
-
-
--------------------------
-
-
 Zakładamy na wszystkich vmkach konto automation z hasłem automation i wpisem do visudo
 
 automation      ALL=(ALL:ALL) NOPASSWD:ALL
@@ -277,6 +247,8 @@ Plik docelowy ma zawierać datę i nazwę hosta
 podpowiedź moduł fetch
 
 
+
+
 - hosts: all
   become: yes
   tasks:
@@ -331,9 +303,8 @@ podpowiedź moduł fetch
     file:
       path: /tmp/raport
       state: absent
-	  
-	  
-	  
+
+
 Zadanie
 
 Dodaj do harmonogramu zadań wpis aby co godzinę data była dopisywana do /var/log/time.log
@@ -352,10 +323,181 @@ Dodaj do harmonogramu zadań wpis aby co godzinę data była dopisywana do /var/
       minute: "0"
       hour: "*"
       job: "/bin/date >> /var/log/time.log"
-	  
-	  
+
 https://docs.ansible.com/projects/ansible/latest/dev_guide/debugging.html
+
 
 Tagi
 
 https://www.linuxtechi.com/how-to-use-tags-in-ansible-playbook/
+
+Windows 11
+
+z praktyczny „runbook” krok po kroku: jak zarządzać Windows 11 dołączonym do domeny z Ansible (najczęściej przez WinRM + Kerberos). Skupię się na ustawieniu łączności, inventory i gotowych playbookach do typowych zadań.
+1) Założenia i rekomendowana architektura
+Control node: Linux (lub WSL) z Ansible.
+
+Windows 11: w domenie AD, DNS działa, czas zsynchronizowany (Kerberos tego wymaga).
+Łączność: WinRM (5985 HTTP lub 5986 HTTPS). W domenie Kerberos jest rekomendowany zamiast Basic/NTLM. 
+2) Przygotowanie Windows 11 (WinRM „po domenowemu”)
+Najlepiej zrobić to przez GPO (a nie ręcznie na każdym hoście):
+2.1 Włącz WinRM i listener
+Na hoście testowym możesz szybko uruchomić:
+
+winrm quickconfig
+To tworzy podstawową konfigurację WinRM. 
+W GPO zwykle ustawiasz:
+
+
+Enable WinRM service
+
+
+Allow WinRM listeners
+
+
+Reguły firewalla na 5985/5986
+2.2 Uwierzytelnianie i szyfrowanie
+
+W domenie trzymaj się Kerberos (lub Negotiate); Ansible opisuje to jako zalecaną opcję w AD. 
+
+
+Jeśli używasz HTTP (5985), dopilnuj message encryption (Ansible/WinRM potrafi to robić przy kerberos/ntlm/credssp). 
+
+
+Produkcyjnie rozważ WinRM po HTTPS (5986) z certyfikatem (częsty hardening), zamiast luzowania ustawień. 
+3) Przygotowanie control node (Ansible)3.1 Zainstaluj kolekcje
+
+ansible-galaxy collection install ansible.windows
+ansible-galaxy collection install microsoft.ad# opcjonalnie:
+ansible-galaxy collection install chocolatey.chocolatey
+win_updates i większość modułów Windows jest w ansible.windows. 
+Moduł do członkostwa domenowego został przeniesiony do microsoft.ad.membership. 
+
+3.2 Kerberos na control node
+Skonfiguruj Kerberos (pakiety zależą od dystrybucji), a potem:
+
+kinit adminuser@TWOJ.REALM
+klist
+Ansible opisuje użycie Kerberosa i biletów jako standardowy flow. 
+
+4) Inventory dla Windows 11 w domenie (WinRM + Kerberos)
+Przykład inventory.ini:
+
+[win11]
+pc01.ad.twojefirma.local
+pc02.ad.twojefirma.local
+[win11:vars]ansible_connection=ansible.builtin.winrmansible_winrm_transport=kerberosansible_port=5985ansible_winrm_scheme=http
+ansible_user=adminuser@AD.TWOJEFIRMA.LOCAL# hasła NIE dawaj w pliku – użyj Ansible Vault albo Kerberos (kinit)
+# Dobre praktyki:ansible_winrm_message_encryption=autoansible_winrm_server_cert_validation=ignore  # tylko jeśli https + self-signed (lepiej użyć prawidłowego CA)
+Dlaczego tak:
+
+
+Ansible wprost rekomenduje Kerberos w domenie. 
+
+
+message_encryption: auto jest wskazane przy HTTP dla bezpieczniejszej komunikacji (gdy transport to kerberos/ntlm/credssp). 
+
+Tip: jeśli łączysz się po IP, a autoryzujesz po nazwie DNS (Kerberos), w PSRP jest opcja override nazwy; przy WinRM zwykle i tak trzymaj się FQDN. (PSRP to alternatywny transport, czasem wygodniejszy w nowych środowiskach.) 
+
+5) Szybki test połączenia
+
+ansible -i inventory.ini win11 -m ansible.windows.win_ping
+
+6) Playbooki „codzienne” dla domenowych Windows 11
+
+6.1 Lokalni administratorzy = grupa domenowa (najczęstszy use-case)
+
+- name: Dodaj domenową grupę do lokalnych Administratorów
+  hosts: win11
+  gather_facts: false
+  tasks:
+    - name: Add AD group to local Administrators
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members:
+          - "TWOJEFIRMA\\IT-Admins"
+        state: present
+(win_group_membership zarządza lokalnymi grupami; domenowych członków podajesz jako DOMAIN\\name). 
+
+6.2 Windows Update (kontrolowane instalacje + reboot)
+
+- name: Aktualizacje Windows
+  hosts: win11
+  gather_facts: false
+  tasks:
+    - name: Install critical and security updates
+      ansible.windows.win_updates:
+        category_names:
+          - CriticalUpdates
+          - SecurityUpdates
+        reboot: yes
+win_updates to standardowy moduł do pobierania i instalowania aktualizacji. 
+
+6.3 Instalacja oprogramowania (MSI/EXE) albo Chocolatey
+Wbudowanie instalatora:
+
+- name: Zainstaluj MSI
+  hosts: win11
+  tasks:
+    - name: Install 7zip MSI
+      ansible.windows.win_package:
+        path: C:\Installers\7z.msi
+        state: present
+win_package instaluje/usuwa pakiety. 
+Chocolatey (jeśli używasz w organizacji):
+
+- name: Instalacje przez Chocolatey
+  hosts: win11
+  tasks:
+    - name: Install git
+      chocolatey.chocolatey.win_chocolatey:
+        name: git
+        state: present
+
+6.4 Wymuszanie ustawień „GPO-friendly” (rejestr/usługi)
+Rejestr:
+
+- name: Ustawienia w rejestrze
+  hosts: win11
+  tasks:
+    - name: Example registry setting
+      ansible.windows.win_regedit:
+        path: HKLM:\Software\MyCompany
+        name: ExampleFlag
+        data: 1
+        type: dword
+
+Usługi:
+
+- name: Usługi
+  hosts: win11
+  tasks:
+    - name: Ensure Windows Update service is running
+      ansible.windows.win_service:
+        name: wuauserv
+        state: started
+        start_mode: auto
+        
+7) Operacje stricte domenowe (członkostwo/obiekty AD)
+Jeśli chcesz zarządzać członkostwem domeny (np. upewnić się, że host jest w dobrej domenie/OU), używaj microsoft.ad.membership, bo stary win_domain_membership został usunięty z ansible.windows. 
+Przykładowy szkic (często robiony „idempotentnie”):
+
+- name: Ensure domain membership
+  hosts: win11
+  gather_facts: false
+  tasks:
+    - name: Ensure machine is domain joined
+      microsoft.ad.membership:
+        dns_domain_name: ad.twojefirma.local
+        state: domain
+        # opcje OU/credentials zależą od Twojego scenariusza
+        reboot: true
+Dokumentacja opisuje to jako następcę win_domain_membership. 
+Jeśli Twoim celem jest tworzenie/uprzątanie obiektów komputerów w AD, rozważ też moduły typu community.windows.win_domain_computer (to już operacje na AD, nie na samym hoście). 
+8) Bezpieczeństwo i praktyka operacyjna (ważne)
+Nie trzymaj haseł w plaintext w inventory — użyj Kerberos (kinit) albo Ansible Vault.
+Preferuj Kerberos w domenie. 
+Produkcyjnie celuj w WinRM over HTTPS i sensowny hardening (certyfikaty, ograniczenie zakresu, firewall). 
+Unikaj ustawiania WinRM „AllowUnencrypted=true” poza diagnostyką; Ansible wskazuje to jako opcję tylko do troubleshooting. 
+
+
